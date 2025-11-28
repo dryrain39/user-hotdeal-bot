@@ -39,6 +39,11 @@ class ZodCrawler(BaseCrawler):
                 self.logger.error("Cannot find article url.")
                 continue
 
+            # deal_partner 게시판 글은 무시
+            if "deal_partner" in article_url:
+                self.logger.debug("Skipping deal_partner article.")
+                continue
+
             title_tag = article_link.select_one(".app-list-title-item")
             title = title_tag.text.strip() if title_tag else ""
 
