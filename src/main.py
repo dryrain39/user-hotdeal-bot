@@ -17,6 +17,7 @@ from src import (
     crawler,
     util,  # noqa: F401
 )
+from src.db import ArticleRepository, close_db, get_async_session, get_engine, init_db
 
 __version__ = "2.2.1"
 
@@ -241,6 +242,11 @@ class BotManager:
 
         # Logfire HTTP 인스트루멘테이션
         logfire.instrument_aiohttp_client()
+
+        # DB 엔진 초기화
+        self.db_engine = get_engine()
+        await init_db(self.db_engine)
+        self.logger.info("Database initialized")
 
         self.crawlers: dict[str, crawler.BaseCrawler] = {}
         self.bots: dict[str, bot.BaseBot] = {}
@@ -481,6 +487,45 @@ class BotManager:
 
         return result
 
+    async def _save_to_db(self, result: CrawlingResult) -> None:
+        """크롤링 결과를 데이터베이스에 저장
+
+        Args:
+            result: 크롤링 결과 (new, update, remove)
+        """
+        if not hasattr(self, "db_engine") or self.db_engine is None:
+            self.logger.debug("DB engine not initialized, skipping DB save")
+            return
+
+        # 저장/업데이트할 게시글이 없으면 스킵
+        if not result["new"] and not result["update"] and not result["remove"]:
+            return
+
+        try:
+            async with get_async_session(self.db_engine) as session:
+                repo = ArticleRepository(session)
+
+                # 새 게시글 및 업데이트된 게시글 upsert
+                articles_to_upsert = result["new"] + result["update"]
+                if articles_to_upsert:
+                    # TypedDict to dict conversion for repository
+                    count = await repo.bulk_upsert([dict(a) for a in articles_to_upsert])
+                    self.logger.debug("DB upsert: %d article(s)", count)
+
+                # 삭제된 게시글 soft delete
+                for article in result["remove"]:
+                    await repo.soft_delete_by_crawler(
+                        crawler_name=article["crawler_name"],
+                        article_id=article["article_id"],
+                    )
+
+                if result["remove"]:
+                    self.logger.debug("DB soft delete: %d article(s)", len(result["remove"]))
+
+        except Exception as e:
+            self.logger.warning("Failed to save to DB: %s", e)
+            # DB 저장 실패해도 봇 동작은 계속되어야 함
+
     async def send(self, d: CrawlingResult):
         """크롤링 결과를 바탕으로 메시지 전송, 수정, 삭제
 
@@ -504,6 +549,9 @@ class BotManager:
                 # 크롤링
                 with logfire.span("crawling"):
                     data = await self.crawling()
+                # DB에 저장
+                with logfire.span("save_to_db"):
+                    await self._save_to_db(data)
                 # 메시지 보내기
                 with logfire.span("send_messages"):
                     await self.send(data)
@@ -542,6 +590,8 @@ class BotManager:
         # 데이터 저장
         self.logger.info("data dump start")
         await self.dump()
+        # DB 세션 닫기
+        await close_db()
         self.logger.info("session close / data dump end")
 
     async def reload(self):
