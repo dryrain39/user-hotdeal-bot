@@ -13,7 +13,11 @@ from src.db.session import get_database_url
 config = context.config
 
 # Set database URL from environment or default
-config.set_main_option("sqlalchemy.url", get_database_url().replace("+aiosqlite", ""))
+# Convert async drivers to sync drivers for Alembic
+db_url = get_database_url()
+db_url = db_url.replace("+aiosqlite", "")  # sqlite+aiosqlite -> sqlite
+db_url = db_url.replace("+aiomysql", "+pymysql")  # mysql+aiomysql -> mysql+pymysql
+config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

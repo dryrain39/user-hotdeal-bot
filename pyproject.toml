@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.10.10",
+    "aiomysql>=0.3.2",
     "aiosqlite>=0.20.0",
     "alembic>=1.14.0",
     "beautifulsoup4>=4.12.3",
