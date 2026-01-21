@@ -2,8 +2,14 @@
 
 from datetime import datetime
 
+from ulid import ULID
 from sqlalchemy import JSON, DateTime, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def generate_ulid() -> str:
+    """Generate a new ULID string."""
+    return str(ULID())
 
 
 class Base(DeclarativeBase):
@@ -17,8 +23,8 @@ class Article(Base):
 
     __tablename__ = "articles"
 
-    # PK: 자동 증가 숫자 ID (API 조회용)
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # PK: ULID (시간순 정렬 가능, DB 비종속적)
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=generate_ulid)
 
     # 원본 데이터
     article_id: Mapped[int] = mapped_column(index=True)

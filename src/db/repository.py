@@ -115,11 +115,11 @@ class ArticleRepository:
 
         return len(articles)
 
-    async def get_by_id(self, article_id: int) -> Article | None:
-        """Get article by primary key ID.
+    async def get_by_id(self, article_id: str) -> Article | None:
+        """Get article by primary key ID (ULID).
 
         Args:
-            article_id: Primary key ID
+            article_id: Primary key ID (ULID string)
 
         Returns:
             Article or None if not found
@@ -147,7 +147,7 @@ class ArticleRepository:
 
     async def list_articles(
         self,
-        after: int | None = None,
+        after: str | None = None,
         crawler: str | None = None,
         site: str | None = None,
         is_end: bool | None = None,
@@ -158,7 +158,7 @@ class ArticleRepository:
         """List articles with filtering options.
 
         Args:
-            after: Return articles with ID greater than this
+            after: Return articles with ID (ULID) greater than this
             crawler: Filter by crawler_name
             site: Filter by site_name
             is_end: Filter by is_end status
@@ -208,11 +208,11 @@ class ArticleRepository:
 
         return articles, total
 
-    async def soft_delete(self, article_id: int) -> bool:
+    async def soft_delete(self, article_id: str) -> bool:
         """Soft delete an article by setting deleted_at.
 
         Args:
-            article_id: Primary key ID
+            article_id: Primary key ID (ULID string)
 
         Returns:
             True if deleted, False if not found

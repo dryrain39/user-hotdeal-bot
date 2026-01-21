@@ -12,7 +12,7 @@ router = APIRouter(prefix="/articles", tags=["articles"])
 async def list_articles(
     _auth: AuthResult,
     repo: ArticleRepo,
-    after: int | None = Query(None, description="Return articles with ID greater than this"),
+    after: str | None = Query(None, description="Return articles with ID (ULID) greater than this"),
     crawler: str | None = Query(None, description="Filter by crawler name"),
     site: str | None = Query(None, description="Filter by site name"),
     is_end: bool | None = Query(None, description="Filter by is_end status"),
@@ -46,11 +46,11 @@ async def list_articles(
 
 @router.get("/{article_id}", response_model=ArticleResponse)
 async def get_article(
-    article_id: int,
+    article_id: str,
     _auth: AuthResult,
     repo: ArticleRepo,
 ) -> ArticleResponse:
-    """Get a single article by ID."""
+    """Get a single article by ID (ULID)."""
     article = await repo.get_by_id(article_id)
     if article is None:
         raise HTTPException(

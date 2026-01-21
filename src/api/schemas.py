@@ -25,7 +25,7 @@ class ArticleResponse(ArticleBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: str  # ULID (26자 문자열, 시간순 정렬 가능)
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
