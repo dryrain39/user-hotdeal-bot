@@ -3,24 +3,87 @@
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
+import yaml
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 # Default database URL (SQLite for development)
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./hotdeal.db"
 
+# Cached config
+_config: dict[str, Any] | None = None
 
-def get_database_url() -> str:
-    """Get database URL from environment variable or use default.
 
-    Environment variable: DATABASE_URL
+def _load_config(config_path: str = "config.yaml") -> dict[str, Any]:
+    """Load config from YAML file.
+
+    Args:
+        config_path: Path to config file
+
+    Returns:
+        Config dictionary, empty dict if file not found
+    """
+    global _config
+    if _config is not None:
+        return _config
+
+    path = Path(config_path)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            _config = yaml.safe_load(f) or {}
+    else:
+        _config = {}
+
+    return _config
+
+
+def get_database_url(config_path: str = "config.yaml") -> str:
+    """Get database URL from config file, environment variable, or use default.
+
+    Priority: config.yaml > DATABASE_URL env var > default
 
     Examples:
         - SQLite: sqlite+aiosqlite:///./hotdeal.db
         - PostgreSQL: postgresql+asyncpg://user:pass@localhost/hotdeal
         - MariaDB: mysql+aiomysql://user:pass@localhost/hotdeal
     """
+    config = _load_config(config_path)
+    db_config = config.get("database", {})
+
+    # Priority: config.yaml > env var > default
+    if url := db_config.get("url"):
+        return url
+
     return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+
+
+def get_database_echo(config_path: str = "config.yaml") -> bool:
+    """Get database echo setting from config file or environment variable."""
+    config = _load_config(config_path)
+    db_config = config.get("database", {})
+
+    # Priority: config.yaml > env var > default (False)
+    if "echo" in db_config:
+        return bool(db_config["echo"])
+
+    return os.getenv("DATABASE_ECHO", "").lower() == "true"
+
+
+def get_timezone(config_path: str = "config.yaml") -> str:
+    """Get timezone from config file or environment variable.
+
+    Priority: config.yaml > TZ env var > default (UTC)
+    """
+    config = _load_config(config_path)
+    app_config = config.get("app", {})
+
+    # Priority: config.yaml > env var > default
+    if tz := app_config.get("timezone"):
+        return tz
+
+    return os.getenv("TZ", "UTC")
 
 
 def get_async_engine(database_url: str | None = None) -> AsyncEngine:
@@ -41,7 +104,7 @@ def get_async_engine(database_url: str | None = None) -> AsyncEngine:
 
     return create_async_engine(
         url,
-        echo=os.getenv("DATABASE_ECHO", "").lower() == "true",
+        echo=get_database_echo(),
         connect_args=connect_args,
     )
 

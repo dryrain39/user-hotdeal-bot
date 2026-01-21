@@ -7,6 +7,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import (
+    ApiKeyRateLimitRepository,
     ApiKeyRepository,
     ArticleRepository,
     GuestRateLimitRepository,
@@ -76,6 +77,18 @@ async def verify_api_key_or_guest(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API key",
             )
+
+        # Rate limit for API key
+        api_key_rate_limit_repo = ApiKeyRateLimitRepository(session)
+        within_limit = await api_key_rate_limit_repo.check_and_increment(
+            api_key.id, api_key.rate_limit_per_minute
+        )
+        if not within_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Maximum {api_key.rate_limit_per_minute} requests per minute.",
+            )
+
         await api_key_repo.update_last_used(x_api_key)
         return x_api_key
 

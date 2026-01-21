@@ -1,18 +1,26 @@
 """FastAPI application entry point."""
 
+import os
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.db import close_db, get_engine, init_db
+from src.db import close_db, get_engine, get_timezone
 
 from .routes import articles_router, crawlers_router, feed_router
 from .schemas import HealthResponse
 
 # Application version (sync with pyproject.toml)
 VERSION = "2.2.1"
+
+# 타임존 설정 (config.yaml > TZ 환경변수 > UTC)
+_timezone = get_timezone()
+os.environ["TZ"] = _timezone
+if hasattr(time, "tzset"):
+    time.tzset()
 
 
 @asynccontextmanager

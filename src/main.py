@@ -6,7 +6,7 @@ import os
 import signal
 import sys
 import time
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 import aiohttp
 import logfire
@@ -17,7 +17,7 @@ from src import (
     crawler,
     util,  # noqa: F401
 )
-from src.db import ArticleRepository, close_db, get_async_session, get_engine, init_db
+from src.db import ArticleRepository, close_db, get_async_session, get_engine, get_timezone
 
 __version__ = "2.2.1"
 
@@ -41,6 +41,12 @@ def load_config_file(config_path: str = "config.yaml") -> "Config":
 _config: "Config" = load_config_file()
 if "logging" in _config:
     logging.config.dictConfig(_config["logging"])
+
+# 타임존 설정 (config.yaml > TZ 환경변수 > UTC)
+_timezone = get_timezone()
+os.environ["TZ"] = _timezone
+if hasattr(time, "tzset"):
+    time.tzset()
 
 # Logfire 설정
 logfire_config = _config.get("logfire", {})
@@ -70,6 +76,9 @@ class CrawlerConfig(TypedDict):
     crawler_name: str
     description: str
     enabled: bool
+    proxy: NotRequired[str | None]
+    ssl_verify: NotRequired[bool]  # SSL 인증서 검증 여부 (기본값: True)
+    ssl_ca_cert: NotRequired[str | None]  # CA 인증서 경로
 
 
 class BotConfig(TypedDict):
@@ -243,10 +252,9 @@ class BotManager:
         # Logfire HTTP 인스트루멘테이션
         logfire.instrument_aiohttp_client()
 
-        # DB 엔진 초기화
+        # DB 엔진 초기화 (테이블 생성은 Alembic 마이그레이션으로만 수행)
         self.db_engine = get_engine()
-        await init_db(self.db_engine)
-        self.logger.info("Database initialized")
+        self.logger.info("Database engine initialized")
 
         self.crawlers: dict[str, crawler.BaseCrawler] = {}
         self.bots: dict[str, bot.BaseBot] = {}
@@ -271,7 +279,16 @@ class BotManager:
             if crawler_name in _crawlers_old:
                 _cwr = _crawlers_old.pop(crawler_name)
                 # 설정이 동일한 경우 재사용
-                if _cwr.url_list == crawler_config["url_list"] and _cwr.cls_name == crawler_config["crawler_name"]:
+                _new_proxy = crawler_config.get("proxy")
+                _new_ssl_verify = crawler_config.get("ssl_verify", True)
+                _new_ssl_ca_cert = crawler_config.get("ssl_ca_cert")
+                if (
+                    _cwr.url_list == crawler_config["url_list"]
+                    and _cwr.cls_name == crawler_config["crawler_name"]
+                    and getattr(_cwr, "proxy", None) == _new_proxy
+                    and getattr(_cwr, "ssl_verify", True) == _new_ssl_verify
+                    and getattr(_cwr, "ssl_ca_cert", None) == _new_ssl_ca_cert
+                ):
                     self.crawlers[crawler_name] = _cwr
                     self.logger.info("Crawler reused: %s (%s)", crawler_name, crawler_config["crawler_name"])
                     continue
@@ -287,7 +304,14 @@ class BotManager:
                 self.logger.warning("Invalid crawler class: %s", crawler_cls_name)
                 continue
             # 크롤러 객체 생성
-            self.crawlers[crawler_name] = crawler_cls(crawler_name, crawler_config["url_list"], self.session)
+            self.crawlers[crawler_name] = crawler_cls(
+                crawler_name,
+                crawler_config["url_list"],
+                self.session,
+                proxy=crawler_config.get("proxy"),
+                ssl_verify=crawler_config.get("ssl_verify", True),
+                ssl_ca_cert=crawler_config.get("ssl_ca_cert"),
+            )
             self.logger.info("Crawler initialized: %s (%s)", crawler_name, crawler_cls_name)
         # 남은 크롤러 객체 목록 출력 (삭제될 크롤러)
         for k, v in _crawlers_old.items():

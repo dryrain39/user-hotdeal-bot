@@ -4,10 +4,21 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import ApiKey, Article, GuestRateLimit, Settings
+from .models import ApiKey, ApiKeyRateLimit, Article, GuestRateLimit, Settings
+
+
+def _is_mysql_session(session: AsyncSession) -> bool:
+    """Check if the session is using MySQL/MariaDB dialect."""
+    if session.bind is None:
+        return False
+    # AsyncEngine uses sync_engine to access dialect
+    engine = session.bind
+    dialect_name = engine.dialect.name
+    return dialect_name in ("mysql", "mariadb")
 
 
 class ArticleRepository:
@@ -39,23 +50,42 @@ class ArticleRepository:
         Returns:
             Upserted Article instance
         """
-        # SQLite upsert using INSERT ... ON CONFLICT
-        stmt = sqlite_insert(Article).values(**article_data)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["crawler_name", "article_id"],
-            set_={
-                "title": stmt.excluded.title,
-                "category": stmt.excluded.category,
-                "site_name": stmt.excluded.site_name,
-                "board_name": stmt.excluded.board_name,
-                "writer_name": stmt.excluded.writer_name,
-                "url": stmt.excluded.url,
-                "is_end": stmt.excluded.is_end,
-                "extra": stmt.excluded.extra,
-                "updated_at": func.now(),
-                "deleted_at": None,  # Restore if was soft-deleted
-            },
-        )
+        update_values = {
+            "title": article_data.get("title"),
+            "category": article_data.get("category"),
+            "site_name": article_data.get("site_name"),
+            "board_name": article_data.get("board_name"),
+            "writer_name": article_data.get("writer_name"),
+            "url": article_data.get("url"),
+            "is_end": article_data.get("is_end"),
+            "extra": article_data.get("extra"),
+            "updated_at": func.now(),
+            "deleted_at": None,  # Restore if was soft-deleted
+        }
+
+        if _is_mysql_session(self.session):
+            # MySQL/MariaDB upsert using INSERT ... ON DUPLICATE KEY UPDATE
+            stmt = mysql_insert(Article).values(**article_data)
+            stmt = stmt.on_duplicate_key_update(**update_values)
+        else:
+            # SQLite upsert using INSERT ... ON CONFLICT
+            stmt = sqlite_insert(Article).values(**article_data)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["crawler_name", "article_id"],
+                set_={
+                    "title": stmt.excluded.title,
+                    "category": stmt.excluded.category,
+                    "site_name": stmt.excluded.site_name,
+                    "board_name": stmt.excluded.board_name,
+                    "writer_name": stmt.excluded.writer_name,
+                    "url": stmt.excluded.url,
+                    "is_end": stmt.excluded.is_end,
+                    "extra": stmt.excluded.extra,
+                    "updated_at": func.now(),
+                    "deleted_at": None,  # Restore if was soft-deleted
+                },
+            )
+
         await self.session.execute(stmt)
         await self.session.flush()
 
@@ -333,6 +363,76 @@ class GuestRateLimitRepository:
         """
         cutoff = datetime.now() - timedelta(minutes=older_than_minutes)
         result = await self.session.execute(select(GuestRateLimit).where(GuestRateLimit.window_start < cutoff))
+        old_records = result.scalars().all()
+
+        count = 0
+        for record in old_records:
+            await self.session.delete(record)
+            count += 1
+
+        await self.session.flush()
+        return count
+
+
+class ApiKeyRateLimitRepository:
+    """Repository for API key rate limiting."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def check_and_increment(self, api_key_id: int, limit_per_minute: int) -> bool:
+        """Check if API key is within rate limit and increment counter.
+
+        Args:
+            api_key_id: API key ID
+            limit_per_minute: Maximum requests per minute
+
+        Returns:
+            True if within limit, False if exceeded
+        """
+        result = await self.session.execute(
+            select(ApiKeyRateLimit).where(ApiKeyRateLimit.api_key_id == api_key_id)
+        )
+        rate_limit = result.scalar_one_or_none()
+
+        now = datetime.now()
+
+        if rate_limit is None:
+            # First request from this API key
+            rate_limit = ApiKeyRateLimit(api_key_id=api_key_id, request_count=1, window_start=now)
+            self.session.add(rate_limit)
+            await self.session.flush()
+            return True
+
+        # Check if window has expired (1 minute)
+        if now - rate_limit.window_start > timedelta(minutes=1):
+            rate_limit.request_count = 1
+            rate_limit.window_start = now
+            await self.session.flush()
+            return True
+
+        # Check if within limit
+        if rate_limit.request_count >= limit_per_minute:
+            return False
+
+        # Increment counter
+        rate_limit.request_count += 1
+        await self.session.flush()
+        return True
+
+    async def cleanup_old_records(self, older_than_minutes: int = 60) -> int:
+        """Remove old rate limit records.
+
+        Args:
+            older_than_minutes: Remove records older than this
+
+        Returns:
+            Number of records deleted
+        """
+        cutoff = datetime.now() - timedelta(minutes=older_than_minutes)
+        result = await self.session.execute(
+            select(ApiKeyRateLimit).where(ApiKeyRateLimit.window_start < cutoff)
+        )
         old_records = result.scalars().all()
 
         count = 0

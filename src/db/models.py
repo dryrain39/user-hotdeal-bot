@@ -79,6 +79,19 @@ class GuestRateLimit(Base):
         return f"<GuestRateLimit(ip={self.ip_address}, count={self.request_count})>"
 
 
+class ApiKeyRateLimit(Base):
+    """API Key rate limiting by key."""
+
+    __tablename__ = "api_key_rate_limits"
+
+    api_key_id: Mapped[int] = mapped_column(primary_key=True)
+    request_count: Mapped[int] = mapped_column(default=0)
+    window_start: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<ApiKeyRateLimit(api_key_id={self.api_key_id}, count={self.request_count})>"
+
+
 class Settings(Base):
     """Application settings stored in database."""
 
