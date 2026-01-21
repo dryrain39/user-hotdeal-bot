@@ -180,4 +180,5 @@ hotdeal.db
 .claude
 .serena
 .ruff_cache
-
+docker-compose.local.yml
+flare-tunnel-data
