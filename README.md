@@ -132,6 +132,31 @@ docker run -d --name user-hotdeal-bot-api \
 #### Docker Volume
 - `hotdeal-db`: SQLite 데이터베이스 파일 저장용 볼륨 (크롤러와 API 서버가 공유)
 
+### MariaDB 백업 (supercronic + S3 호환 스토리지)
+- 전용 이미지: `Dockerfile.backup` (supercronic + mariadb-client + awscli)
+- 설정은 **환경 변수만 사용**합니다 (`config.yaml`은 읽지 않음).
+
+| 환경 변수 | 용도 | 기본값/예시 |
+| --- | --- | --- |
+| `BACKUP_SCHEDULE` | supercronic 스케줄 (TZ 기준) | `0 18 * * *` |
+| `TZ` | 컨테이너 타임존 | `UTC` (compose 예시는 `Asia/Seoul`) |
+| `MARIADB_HOST` / `MARIADB_PORT` | DB 주소/포트 | `db` / `3306` |
+| `MARIADB_USER` / `MARIADB_PASSWORD` | DB 계정 | `hotdeal` / `hotdealpassword` |
+| `MARIADB_DATABASE` | 대상 DB명 | `hotdeal` |
+| `S3_BUCKET` | 백업 저장 버킷 | 예: `hotdeal-backup` |
+| `S3_PREFIX` | 객체 경로 prefix | `mariadb` |
+| `S3_ENDPOINT` | MinIO 등 S3 호환 endpoint | `http://minio:9000` |
+| `S3_REGION` | 리전 | `us-east-1` |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | S3 자격 증명 | 필수 |
+| `BACKUP_NAME_PREFIX` | 파일명 prefix | `hotdeal` |
+| `BACKUP_TMP_DIR` | 임시 디렉터리 | `/tmp` |
+| `RETENTION_DAYS` | S3 보관 일수 (삭제) | unset 시 미사용 |
+| `BACKUP_TIMESTAMP_OVERRIDE` | 강제 타임스탬프 (테스트용) | unset |
+
+- docker-compose 실행 예시: `docker-compose -f docker-compose.local.example.yml up -d backup` (MariaDB 서비스와 연동)
+- 단독 실행 예시: `docker build -t user-hotdeal-backup -f Dockerfile.backup . && docker run --rm --env-file .env.backup user-hotdeal-backup`
+- 복구 예시: `aws s3 cp s3://<bucket>/<prefix>/<file>.sql.gz - | gunzip | mysql -h <host> -u <user> -p<pass> <db>`
+
 ## API 서버
 
 FastAPI 기반 REST API 서버로 핫딜 데이터를 외부에서 조회할 수 있습니다.

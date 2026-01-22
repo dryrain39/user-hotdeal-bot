@@ -92,6 +92,32 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # MariaDB backup to S3-compatible storage (cron via supercronic)
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    container_name: hotdeal-backup
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Seoul
+      - 'BACKUP_SCHEDULE=0 18 * * *'
+      - MARIADB_HOST=db
+      - MARIADB_PORT=3306
+      - MARIADB_USER=hotdeal
+      - MARIADB_PASSWORD=hotdealpassword
+      - MARIADB_DATABASE=hotdeal
+      - S3_BUCKET=total-bak
+      - S3_PREFIX=user-hotdeal-bot
+      - S3_ENDPOINT=http://minio:9000
+      - S3_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=change-me
+      - AWS_SECRET_ACCESS_KEY=change-me
+      - RETENTION_DAYS=70
+    depends_on:
+      db:
+        condition: service_healthy
+
   # FlareTunnel rotating proxy (Cloudflare Workers)
   flaretunnel:
     build:
