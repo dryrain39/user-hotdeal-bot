@@ -102,10 +102,23 @@ def get_async_engine(database_url: str | None = None) -> AsyncEngine:
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
 
+    # Pool settings for connection stability
+    # - pool_pre_ping: Check connection validity before use (handles stale connections)
+    # - pool_recycle: Recreate connections after 1 hour (before MariaDB's wait_timeout)
+    pool_kwargs = {}
+    if not url.startswith("sqlite"):
+        pool_kwargs = {
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+            "pool_size": 5,
+            "max_overflow": 10,
+        }
+
     return create_async_engine(
         url,
         echo=get_database_echo(),
         connect_args=connect_args,
+        **pool_kwargs,
     )
 
 
